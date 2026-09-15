@@ -160,8 +160,10 @@ function buildData(state, days) {
   const dayList = [];
   for (let i = days - 1; i >= 0; i--) dayList.push(dateStr(new Date(today.getTime() - i * 86400000)));
   const daySet = new Set(dayList);
+  const todayStr = dayList[dayList.length - 1];
 
   const daily = new Map(dayList.map(d => [d, { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0 }]));
+  const hourly = Array.from({ length: 24 }, () => ({ input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0 }));
   const dailyModel = new Map();          // date -> Map(model -> total)
   const modelTotal = new Map();
   const projectTotal = new Map();        // key: name + '' + path
@@ -177,6 +179,10 @@ function buildData(state, days) {
     const total = inp + out + cr + cc;
     const dd = daily.get(d);
     dd.input += inp; dd.output += out; dd.cacheRead += cr; dd.cacheCreation += cc; dd.requests += 1;
+    if (d === todayStr) {
+      const h = hourly[dt.getHours()];
+      h.input += inp; h.output += out; h.cacheRead += cr; h.cacheCreation += cc; h.requests += 1;
+    }
     if (!dailyModel.has(d)) dailyModel.set(d, new Map());
     const dm = dailyModel.get(d);
     dm.set(model, (dm.get(model) || 0) + total);
@@ -246,6 +252,11 @@ function buildData(state, days) {
     dateRange: `${dayList[0]} ~ ${dayList[dayList.length - 1]}`,
     dayList,
     daily: dailyOut,
+    todayHourly: hourly.map(h => ({
+      input: h.input, output: h.output, cacheRead: h.cacheRead,
+      total: h.input + h.output + h.cacheRead + h.cacheCreation,
+      requests: h.requests,
+    })),
     models,
     dailyModel: dailyModelOut,
     modelRank,
@@ -343,6 +354,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
 <div class="grid">
   <div class="card full"><h2>每日 Token 趋势</h2><div id="chartDaily" class="chart tall"></div></div>
+  <div class="card full"><h2>今日 Token 趋势（按小时）</h2><div id="chartTodayHourly" class="chart"></div></div>
   <div class="card"><h2>模型占比</h2><div id="chartModelPie" class="chart"></div></div>
   <div class="card"><h2>每日 × 模型</h2><div id="chartModelDaily" class="chart"></div></div>
   <div class="card"><h2>缓存命中率（按日）</h2><div id="chartHitRate" class="chart"></div></div>
@@ -431,7 +443,28 @@ opts.chartDaily = {
   ],
 };
 
-// 2. 模型占比饼图
+// 2. 今日 token 趋势（按小时，堆叠柱）
+opts.chartTodayHourly = {
+  tooltip: Object.assign({}, baseTooltip, { trigger: 'axis',
+    formatter: function (ps) {
+      var i = ps[0].dataIndex, h = DATA.todayHourly[i];
+      var html = '<b>' + String(i).padStart(2, '0') + ':00 - ' + String(i).padStart(2, '0') + ':59</b><br>';
+      ps.forEach(function (p) { if (p.value) html += p.marker + p.seriesName + ': ' + fmt(p.value) + '<br>'; });
+      html += '合计: ' + fmt(h.total) + '<br>请求数: ' + fmt(h.requests);
+      return html;
+    } }),
+  legend: { textStyle: { color: '#8a91a5' } },
+  grid: { left: 60, right: 20, top: 40, bottom: 30 },
+  xAxis: Object.assign({ type: 'category', data: DATA.todayHourly.map(function (_, i) { return String(i).padStart(2, '0'); }) }, baseAxis),
+  yAxis: { type: 'value', axisLabel: Object.assign({}, baseAxis.axisLabel, { formatter: abbrev }), splitLine: baseAxis.splitLine },
+  series: [
+    { name: 'input', type: 'bar', stack: 't', data: DATA.todayHourly.map(function (h) { return h.input; }), itemStyle: { color: '#5b8def' } },
+    { name: 'output', type: 'bar', stack: 't', data: DATA.todayHourly.map(function (h) { return h.output; }), itemStyle: { color: '#4cc38a' } },
+    { name: 'cacheRead', type: 'bar', stack: 't', data: DATA.todayHourly.map(function (h) { return h.cacheRead; }), itemStyle: { color: '#9b7ede' } },
+  ],
+};
+
+// 3. 模型占比饼图
 (function () {
   var topModels = DATA.modelRank.slice(0, 8);
   var otherTotal = DATA.modelRank.slice(8).reduce(function (s, m) { return s + m.total; }, 0);
