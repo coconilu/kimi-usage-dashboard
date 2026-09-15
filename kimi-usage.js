@@ -423,7 +423,6 @@ opts.chartDaily = {
     { name: 'input', type: 'bar', stack: 't', data: DATA.daily.map(function (d) { return d.input; }), itemStyle: { color: '#5b8def' } },
     { name: 'output', type: 'bar', stack: 't', data: DATA.daily.map(function (d) { return d.output; }), itemStyle: { color: '#4cc38a' } },
     { name: 'cacheRead', type: 'bar', stack: 't', data: DATA.daily.map(function (d) { return d.cacheRead; }), itemStyle: { color: '#9b7ede' } },
-    { name: 'cacheCreation', type: 'bar', stack: 't', data: DATA.daily.map(function (d) { return d.cacheCreation; }), itemStyle: { color: '#e5a545' } },
   ],
 };
 
@@ -531,14 +530,14 @@ Object.keys(opts).forEach(function (id) {
   var rows = DATA.sessions.slice(0, 200);
   var head = '<thead><tr>' +
     '<th class="l">Session</th><th class="l">项目</th><th class="l">模型</th>' +
-    '<th>Input</th><th>Output</th><th>CacheRead</th><th>CacheCreation</th>' +
+    '<th>Input</th><th>Output</th><th>CacheRead</th>' +
     '<th>请求数</th><th class="l">开始</th><th class="l">结束</th><th>Total</th></tr></thead>';
   var body = rows.map(function (s) {
     return '<tr>' +
       '<td class="l mono" title="' + s.sessionId + '">' + s.sessionId.replace('session_', '').slice(0, 8) + '…</td>' +
       '<td class="l" title="' + s.workDir + '">' + s.project + '</td>' +
       '<td class="l mono" title="' + s.models.join(', ') + '">' + (s.models.length > 1 ? s.models.length + ' 个模型' : s.models[0]) + '</td>' +
-      '<td>' + fmt(s.input) + '</td><td>' + fmt(s.output) + '</td><td>' + fmt(s.cacheRead) + '</td><td>' + fmt(s.cacheCreation) + '</td>' +
+      '<td>' + fmt(s.input) + '</td><td>' + fmt(s.output) + '</td><td>' + fmt(s.cacheRead) + '</td>' +
       '<td>' + fmt(s.requests) + '</td>' +
       '<td class="l mono">' + fmtTime(s.first) + '</td><td class="l mono">' + fmtTime(s.last) + '</td>' +
       '<td><b>' + fmt(s.total) + '</b></td></tr>';
