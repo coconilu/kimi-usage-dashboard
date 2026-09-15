@@ -27,7 +27,7 @@ python python/build_dashboard.py --open   # Python fallback (no Node required), 
 
 ## Features
 
-- Live dashboard (SSE): daily trend, per-model breakdown, cache hit rate, project ranking, weekday×hour heatmap, session details
+- Live dashboard (SSE): daily trend, today's hourly trend, per-model breakdown, cache hit rate, project ranking, GitHub-style yearly activity calendar, session details
 - Incremental log tailing — new turns show up within seconds
 - Single-file, zero-dependency Node script (only built-in modules)
 - Static `--export` mode produces one shareable HTML file
@@ -87,7 +87,7 @@ python python/build_dashboard.py --open   # Python 版（无需 Node 环境）�
 
 ## 功能特性
 
-- 实时 Dashboard（SSE 推送）：每日趋势、模型细分、缓存命中率、项目排行、星期×小时热力、会话明细
+- 实时 Dashboard（SSE 推送）：每日趋势、今日按小时趋势、模型细分、缓存命中率、项目排行、GitHub 风格年度活动日历、会话明细
 - 增量读取日志，新用量几秒内上屏
 - 单文件零依赖 Node 脚本（只用内置模块）
 - `--export` 生成单个可分享的静态 HTML

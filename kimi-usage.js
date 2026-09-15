@@ -167,7 +167,7 @@ function buildData(state, days) {
   const dailyModel = new Map();          // date -> Map(model -> total)
   const modelTotal = new Map();
   const projectTotal = new Map();        // key: name + '' + path
-  const heatmap = Array.from({ length: 7 }, () => new Array(24).fill(0));
+  const calDaily = new Map();            // dateStr -> {total, requests}，不受 --days 窗口限制
   const sessions = new Map();
 
   for (const row of state.records) {
@@ -175,6 +175,9 @@ function buildData(state, days) {
     const t = rec[0], model = rec[1], inp = rec[2], out = rec[3], cr = rec[4], cc = rec[5];
     const dt = new Date(t);
     const d = dateStr(dt);
+    const ce = calDaily.get(d) || { total: 0, requests: 0 };
+    ce.total += inp + out + cr + cc; ce.requests += 1;
+    calDaily.set(d, ce);
     if (!daySet.has(d)) continue;
     const total = inp + out + cr + cc;
     const dd = daily.get(d);
@@ -191,8 +194,6 @@ function buildData(state, days) {
     const proj = projectName(wd);
     const pk = proj + ' ' + wd;
     projectTotal.set(pk, (projectTotal.get(pk) || 0) + total);
-    const wdIdx = (dt.getDay() + 6) % 7; // 周一 = 0
-    heatmap[wdIdx][dt.getHours()] += total;
 
     let s = sessions.get(row.sid);
     if (!s) {
@@ -244,6 +245,7 @@ function buildData(state, days) {
   const sumCc = dailyOut.reduce((s, d) => s + d.cacheCreation, 0);
   const denom = sumInput + sumCr + sumCc;
   const dt2 = new Date(now);
+  const calStart = dateStr(new Date(today.getTime() - 364 * 86400000));
   const fmtNow = `${dt2.getFullYear()}-${pad2(dt2.getMonth() + 1)}-${pad2(dt2.getDate())} ${pad2(dt2.getHours())}:${pad2(dt2.getMinutes())}:${pad2(dt2.getSeconds())}`;
 
   return {
@@ -261,7 +263,10 @@ function buildData(state, days) {
     dailyModel: dailyModelOut,
     modelRank,
     projectRank,
-    heatmap,
+    calendar: {
+      range: [calStart, todayStr],
+      days: [...calDaily.entries()].map(([d, v]) => [d, v.total, v.requests]),
+    },
     sessions: sessionRows,
     kpi: {
       weekTotal,
@@ -328,6 +333,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
   .card h2 { font-size: 15px; font-weight: 600; color: #c9cedb; margin-bottom: 12px; }
   .chart { width: 100%; height: 320px; }
   .chart.tall { height: 380px; }
+  .chart.cal { height: 210px; }
   .full { grid-column: 1 / -1; }
   table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
   th, td { padding: 7px 10px; text-align: right; border-bottom: 1px solid #232836; white-space: nowrap; }
@@ -361,7 +367,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
   <div class="card"><h2>每日 × 模型</h2><div id="chartModelDaily" class="chart"></div></div>
   <div class="card"><h2>缓存命中率（按日）</h2><div id="chartHitRate" class="chart"></div></div>
   <div class="card"><h2>项目排行（Top 15）</h2><div id="chartProjects" class="chart"></div></div>
-  <div class="card full"><h2>星期 × 小时 热力图</h2><div id="chartHeatmap" class="chart"></div></div>
+  <div class="card full"><h2>每日活动（近一年，按日）</h2><div id="chartCalendar" class="chart cal"></div></div>
   <div class="card full"><h2>会话明细（点击 开始/结束/Total 表头排序，最多 200 行）</h2>
     <div class="table-wrap"><table id="sessionTable"></table></div>
   </div>
@@ -536,29 +542,35 @@ opts.chartHitRate = {
   };
 })();
 
-// 6. 星期 × 小时 热力图
+// 6. 每日活动日历热力图（GitHub 贡献图风格，近一年）
 (function () {
-  var weekNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-  var hours = [];
-  for (var i = 0; i < 24; i++) hours.push(i + '时');
-  var data = [], max = 0;
-  DATA.heatmap.forEach(function (row, wd) {
-    row.forEach(function (v, h) { data.push([h, wd, v]); if (v > max) max = v; });
-  });
-  opts.chartHeatmap = {
-    tooltip: Object.assign({}, baseTooltip, { formatter: function (p) { return weekNames[p.value[1]] + ' ' + p.value[0] + '时<br>' + fmt(p.value[2]) + ' tokens'; } }),
-    grid: { left: 60, right: 20, top: 10, bottom: 60 },
-    xAxis: Object.assign({ type: 'category', data: hours }, baseAxis),
-    yAxis: Object.assign({ type: 'category', data: weekNames }, baseAxis),
+  var max = 0;
+  DATA.calendar.days.forEach(function (d) { if (d[1] > max) max = d[1]; });
+  opts.chartCalendar = {
+    tooltip: Object.assign({}, baseTooltip, {
+      formatter: function (p) {
+        return '<b>' + p.data[0] + '</b><br>total: ' + fmt(p.data[1]) + '<br>请求数: ' + fmt(p.data[2]);
+      } }),
     visualMap: {
-      min: 0, max: max || 1, calculable: true, orient: 'horizontal',
-      left: 'center', bottom: 0, textStyle: { color: '#8a91a5' },
-      inRange: { color: ['#161a22', '#1f3a5f', '#2f6bc4', '#5b8def', '#9db9f5'] },
-      formatter: function (v) { return abbrev(v); },
+      min: 0, max: max || 1, dimension: 1, show: true, orient: 'horizontal',
+      right: 10, bottom: 0, text: ['多', '少'], textStyle: { color: '#7a8194' },
+      itemWidth: 12, itemHeight: 90,
+      inRange: { color: ['#181d28', '#1f3a5f', '#2f6bc4', '#5b8def', '#9db9f5'] },
     },
-    series: [{ type: 'heatmap', data: data, label: { show: false }, itemStyle: { borderColor: '#0f1115', borderWidth: 1 } }],
+    calendar: {
+      top: 35, left: 55, right: 20, bottom: 40,
+      orient: 'horizontal', range: DATA.calendar.range,
+      cellSize: ['auto', 16], firstDayOfWeek: 0,
+      yearLabel: { show: false },
+      monthLabel: { color: '#8a91a5', fontSize: 11, nameMap: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'] },
+      dayLabel: { color: '#8a91a5', fontSize: 11, nameMap: ['', '周一', '', '周三', '', '周五', ''] },
+      splitLine: { show: false },
+      itemStyle: { color: '#181d28', borderColor: '#0f1115', borderWidth: 3 },
+    },
+    series: [{ type: 'heatmap', coordinateSystem: 'calendar', data: DATA.calendar.days }],
   };
 })();
+
 
 Object.keys(opts).forEach(function (id) {
   if (!renderAll.charts[id]) renderAll.charts[id] = echarts.init(document.getElementById(id));
