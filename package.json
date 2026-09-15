@@ -1,0 +1,26 @@
+{
+  "name": "kimi-usage",
+  "version": "0.1.0",
+  "description": "Zero-dependency local usage analytics dashboard for Kimi Code CLI — scans wire.jsonl logs and serves a live self-contained HTML report",
+  "keywords": [
+    "kimi-code",
+    "usage",
+    "dashboard",
+    "tokens"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coconilu/kimi-usage-dashboard.git"
+  },
+  "bin": {
+    "kimi-usage": "kimi-usage.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "kimi-usage.js",
+    "docs/screenshot.png"
+  ]
+}

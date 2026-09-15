@@ -1,61 +1,60 @@
-# kimi-usage-dashboard
+# kimi-usage
 
 [English](#english) · [中文](#中文)
 
 <a id="english"></a>
 
-A zero-dependency local usage analytics dashboard for **Kimi Code CLI** — a single Python file that scans your local `wire.jsonl` session logs and generates a self-contained HTML report. All data stays on your machine.
+A zero-dependency local usage analytics dashboard for **Kimi Code CLI** — one Node.js file scans your local `wire.jsonl` session logs and opens a **live-updating** dashboard in your browser. Nothing to install, nothing uploaded.
 
 ![screenshot](docs/screenshot.png)
 
-## Features
-
-- 📈 Daily token trend (stacked input / output / cache-read / cache-creation, with request counts and cache hit rate)
-- 🥧 Model breakdown — share pie chart plus per-day × per-model stacked bars
-- 💾 Daily cache hit-rate line (see how much the prompt cache saves you)
-- 🗂️ Project ranking (Top 15, aggregated by `workDir`)
-- 🌡️ Weekday × hour heatmap of your coding rhythm
-- 📋 Per-session detail table (tokens, models, requests, first/last activity)
-- ⚡ Incremental cache — first full scan takes seconds, refreshes are sub-second
-- 🐍 Pure Python standard library, zero dependencies; the report is one self-contained HTML file
-- 🔒 100% local — nothing is uploaded anywhere
-
 ## Quickstart
 
-Requires **Python 3.8+**, works on Windows / macOS / Linux.
+Requires **Node.js 18+** (Windows / macOS / Linux):
 
 ```bash
-python build_dashboard.py --days 30 --open
+npx kimi-usage
 ```
 
-This writes `dashboard.html` next to the script and opens it in your browser (drop `--open` to skip). Options:
+That's it — it scans your logs, starts a local server, opens the dashboard, pushes new usage to the page in real time, and exits by itself after you close the browser tab. (After the first run, npx caches the package and starts instantly.)
 
-| Flag | Default | Description |
-|---|---|---|
-| `--days N` | `30` | Only include the last N days |
-| `--home PATH` | `$KIMI_CODE_HOME` or `~/.kimi-code` | Kimi Code data root |
-| `--out FILE` | `./dashboard.html` | Output HTML path |
-| `--open` | off | Open the report in the default browser |
+**Alternatives:**
+
+```bash
+npx kimi-usage --export report.html   # self-contained static HTML, shareable anywhere
+python python/build_dashboard.py --open   # Python fallback (no Node required), static export only
+```
+
+## Features
+
+- Live dashboard (SSE): daily trend, per-model breakdown, cache hit rate, project ranking, weekday×hour heatmap, session details
+- Incremental log tailing — new turns show up within seconds
+- Single-file, zero-dependency Node script (only built-in modules)
+- Static `--export` mode produces one shareable HTML file
+- Data never leaves your machine; server binds to 127.0.0.1 only
+- Auto-exit when all browser tabs are closed — no background daemon
+
+## Design principles
+
+1. **Zero install, zero dependency** — one file, no `node_modules`, run it via npx.
+2. **Use it and walk away** — no resident process; the server exits when you're done.
+3. **Local only** — logs are parsed on your machine and nothing is ever uploaded.
 
 ## Data source
 
-Kimi Code CLI stores full session transcripts locally under `~/.kimi-code/sessions/`. Each session has `agents/<agentId>/wire.jsonl` files (sub-agents included) containing `usage.record` entries with per-turn token usage; `~/.kimi-code/session_index.jsonl` maps sessions to their working directory (the "project" dimension). The script streams every `wire.jsonl` line-by-line, keeps only turn-level usage records, and aggregates them. Set the `KIMI_CODE_HOME` environment variable (or pass `--home`) if your data lives elsewhere.
+Kimi Code CLI stores session transcripts under `~/.kimi-code/sessions/` (`agents/*/wire.jsonl`, including sub-agents) plus a `session_index.jsonl` mapping sessions to working directories. The tool streams those logs, keeps only turn-level `usage.record` entries, and aggregates them. Override the data root with `KIMI_CODE_HOME` or `--home`.
 
-An incremental cache (`.usage-cache.json`, keyed by file mtime+size) makes repeat runs nearly instant; delete it to force a full rescan.
-
-## Why not ccusage?
-
-[ccusage](https://github.com/ryoppippi/ccusage) is an excellent multi-tool CLI usage analyzer. This project deliberately focuses on **Kimi Code only** and goes deeper on visualization: per-model-per-day breakdowns, project and session dimensions, cache hit-rate tracking, and the weekday×hour heatmap. [KimiCodeBar](https://github.com/fashioncj/KimiCodeBar) is a always-on tray quota monitor; this is an on-demand analytical report. They complement each other.
+Options: `--days N` (default 30) · `--port N` · `--no-open` · `--export FILE` · `--home PATH` · `--help`
 
 ## Known limitations
 
-- **Cost estimates and weekly quota percentages are server-side data.** Local logs contain token counts only — check `/usage` in the CLI or the Kimi Code Console for billing and quota.
+- **Cost and weekly-quota percentage are server-side data** — local logs only contain token counts. Use `/usage` in the CLI or the Kimi Code Console for billing.
 
 ## Roadmap
 
-- [ ] Cost estimation (via LiteLLM pricing data)
-- [ ] `--watch` mode with auto-refresh
-- [ ] More export formats (CSV / JSON)
+- [ ] Cost estimation (via LiteLLM pricing)
+- [ ] CSV / JSON export
+- [ ] Multi-machine aggregated view
 
 ## License
 
@@ -65,58 +64,57 @@ An incremental cache (`.usage-cache.json`, keyed by file mtime+size) makes repea
 
 <a id="中文"></a>
 
-# kimi-usage-dashboard（中文说明）
+# kimi-usage（中文说明）
 
-**Kimi Code 专用的零依赖本地用量分析 Dashboard** —— 一个 Python 文件，扫描本地 `wire.jsonl` 会话日志，生成自包含的 HTML 报告。数据不出本机。
-
-## 功能特性
-
-- 📈 每日 token 趋势（input / output / cacheRead / cacheCreation 堆叠，附请求数与缓存命中率）
-- 🥧 模型维度：占比饼图 + 每日 × 模型堆叠柱状图
-- 💾 缓存命中率折线（按日）
-- 🗂️ 项目排行 Top 15（按 workDir 聚合）
-- 🌡️ 星期 × 小时热力图（你的编码节奏一目了然）
-- 📋 会话明细表（token、模型、请求数、首末时间）
-- ⚡ 增量缓存：首次全量秒级完成，之后刷新亚秒级
-- 🐍 纯标准库零依赖；产物是单个自包含 HTML 文件
-- 🔒 完全本地运行，无任何数据上传
+**Kimi Code 专用的零依赖本地用量分析 Dashboard** —— 一个 Node.js 文件，扫描本地 `wire.jsonl` 会话日志，在浏览器里打开**实时更新**的用量面板。零安装，数据不出本机。
 
 ## 快速开始
 
-需要 **Python 3.8+**，支持 Windows / macOS / Linux。
+需要 **Node.js 18+**（Windows / macOS / Linux）：
 
 ```bash
-python build_dashboard.py --days 30 --open
+npx kimi-usage
 ```
 
-生成 `dashboard.html` 并用默认浏览器打开（去掉 `--open` 则不打开）。参数说明：
+它会扫描日志、启动本地服务、自动打开 Dashboard、实时推送新用量，关掉浏览器标签页后自动退出。（首次运行后 npx 有缓存，之后秒开。）
 
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `--days N` | `30` | 只统计最近 N 天 |
-| `--home PATH` | `$KIMI_CODE_HOME` 或 `~/.kimi-code` | Kimi Code 数据根目录 |
-| `--out FILE` | `./dashboard.html` | 输出 HTML 路径 |
-| `--open` | 关 | 生成后自动打开 |
+**备选方案：**
+
+```bash
+npx kimi-usage --export report.html   # 导出自包含静态 HTML，拷给别人也能打开
+python python/build_dashboard.py --open   # Python 版（无需 Node 环境），仅静态导出
+```
+
+## 功能特性
+
+- 实时 Dashboard（SSE 推送）：每日趋势、模型细分、缓存命中率、项目排行、星期×小时热力、会话明细
+- 增量读取日志，新用量几秒内上屏
+- 单文件零依赖 Node 脚本（只用内置模块）
+- `--export` 生成单个可分享的静态 HTML
+- 数据不出本机，服务只监听 127.0.0.1
+- 浏览器全关后自动退出，无常驻进程
+
+## 设计原则
+
+1. **零依赖零安装** —— 单文件、无 `node_modules`，npx 直接跑。
+2. **用完即走** —— 无常驻进程，看完自动退出。
+3. **数据不出本机** —— 日志只在本机解析，绝不上传。
 
 ## 数据源
 
-Kimi Code CLI 把每个会话的完整记录存在本地 `~/.kimi-code/sessions/` 下。每个会话目录的 `agents/<agentId>/wire.jsonl`（含子代理）里有 `usage.record` 用量记录；`~/.kimi-code/session_index.jsonl` 提供 sessionId → workDir 的映射（即「项目」维度）。脚本流式逐行扫描所有 wire.jsonl，只取 turn 级记录做聚合。数据目录不在默认位置时，用 `KIMI_CODE_HOME` 环境变量或 `--home` 参数指定。
+Kimi Code CLI 把会话记录存在 `~/.kimi-code/sessions/`（`agents/*/wire.jsonl`，含子代理），`session_index.jsonl` 提供会话 → 项目目录映射。工具流式解析这些日志，只取 turn 级 `usage.record` 做聚合。数据根目录可用 `KIMI_CODE_HOME` 或 `--home` 覆盖。
 
-同目录的 `.usage-cache.json` 是增量缓存（按文件 mtime+size 判断），让重复运行近乎瞬时；删掉它即可强制全量重扫。
-
-## 为什么不用 ccusage？
-
-[ccusage](https://github.com/ryoppippi/ccusage) 是优秀的多工具 CLI 用量统计器。本项目专注 **Kimi Code**，在可视化上做深：每模型每日细分、项目/会话维度、缓存命中率、星期×小时热力图。[KimiCodeBar](https://github.com/fashioncj/KimiCodeBar) 是托盘常驻的额度监控，本项目是按需生成的分析报表——定位互补。
+参数：`--days N`（默认 30）· `--port N` · `--no-open` · `--export FILE` · `--home PATH` · `--help`
 
 ## 已知限制
 
-- **费用估算和周额度百分比是服务端数据**，本地日志只有 token 计数——请使用 CLI 内 `/usage` 或 Kimi Code Console 查看。
+- **费用与周额度百分比是服务端数据**，本地日志只有 token 计数——请用 CLI 内 `/usage` 或 Kimi Code Console 查看。
 
 ## Roadmap
 
-- [ ] 成本估算（接入 LiteLLM 定价数据）
-- [ ] `--watch` 自动刷新模式
-- [ ] 更多导出格式（CSV / JSON）
+- [ ] 成本估算（接入 LiteLLM 定价）
+- [ ] CSV / JSON 导出
+- [ ] 多机器汇总视图
 
 ## License
 
