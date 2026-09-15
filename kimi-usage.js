@@ -324,6 +324,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
   td.l, th.l { text-align: left; }
   tbody tr:hover { background: #1c2130; }
   .table-wrap { max-height: 560px; overflow-y: auto; }
+  * { scrollbar-width: thin; scrollbar-color: #2e3548 transparent; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2e3548; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3d4560; }
   .mono { font-family: Consolas, monospace; font-size: 11px; color: #8a91a5; }
   @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
 </style>
