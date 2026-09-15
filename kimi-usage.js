@@ -352,6 +352,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 function renderAll(DATA) {
 
 var fmt = function (n) { return n == null ? '-' : Math.round(n).toLocaleString('en-US'); };
+var fmtCN = function (n) {
+  if (n == null) return '';
+  if (n >= 1e8) return '≈ ' + (n / 1e8).toFixed(1) + ' 亿';
+  if (n >= 1e4) return '≈ ' + (n / 1e4).toFixed(1) + ' 万';
+  return '';
+};
 var fmtPct = function (x) { return x == null ? '-' : (x * 100).toFixed(1) + '%'; };
 var abbrev = function (v) {
   if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B';
@@ -378,11 +384,11 @@ document.getElementById('meta').textContent =
     wowHtml = '<span class="' + wowCls + '">' + (k.weekOverWeek >= 0 ? '+' : '') + pct + '% vs 上周</span>';
   }
   var cards = [
-    ['本周 Tokens（7 天）', fmt(k.weekTotal), ''],
-    ['今日 Tokens', fmt(k.todayTotal), ''],
+    ['本周 Tokens（7 天）', fmt(k.weekTotal), fmtCN(k.weekTotal)],
+    ['今日 Tokens', fmt(k.todayTotal), fmtCN(k.todayTotal)],
     ['总缓存命中率', fmtPct(k.cacheHitRate), ''],
     ['活跃会话数', fmt(k.activeSessions), ''],
-    ['上周同期', fmt(k.prevWeekTotal), wowHtml],
+    ['上周同期', fmt(k.prevWeekTotal), (fmtCN(k.prevWeekTotal) ? fmtCN(k.prevWeekTotal) + ' · ' : '') + wowHtml],
   ];
   document.getElementById('kpiRow').innerHTML = cards.map(function (c) {
     return '<div class="kpi-card"><div class="label">' + c[0] + '</div><div class="value">' + c[1] + '</div><div class="sub">' + c[2] + '</div></div>';
