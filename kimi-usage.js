@@ -435,7 +435,7 @@ opts.chartDaily = {
   if (otherTotal > 0) pieData.push({ name: '其他', value: otherTotal });
   opts.chartModelPie = {
     tooltip: Object.assign({}, baseTooltip, { formatter: function (p) { return p.name + '<br>' + fmt(p.value) + ' (' + p.percent + '%)'; } }),
-    legend: { type: 'scroll', bottom: 0, textStyle: { color: '#8a91a5', fontSize: 11 } },
+    legend: { bottom: 0, textStyle: { color: '#8a91a5', fontSize: 11 } },
     series: [{
       type: 'pie', radius: ['38%', '65%'], center: ['50%', '45%'],
       label: { color: '#8a91a5', fontSize: 11, formatter: '{b}' },
@@ -454,8 +454,8 @@ opts.chartDaily = {
         ps.forEach(function (p) { if (p.value) html += p.marker + p.seriesName + ': ' + fmt(p.value) + '<br>'; });
         return html;
       } }),
-    legend: { type: 'scroll', top: 0, textStyle: { color: '#8a91a5', fontSize: 11 } },
-    grid: { left: 60, right: 20, top: 40, bottom: 30 },
+    legend: { top: 0, textStyle: { color: '#8a91a5', fontSize: 11 } },
+    grid: { left: 60, right: 20, top: 64, bottom: 30 },
     xAxis: Object.assign({ type: 'category', data: shortDays }, baseAxis),
     yAxis: { type: 'value', axisLabel: Object.assign({}, baseAxis.axisLabel, { formatter: abbrev }), splitLine: baseAxis.splitLine },
     series: DATA.models.map(function (m, i) {
