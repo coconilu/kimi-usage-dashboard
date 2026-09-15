@@ -332,6 +332,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
   table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
   th, td { padding: 7px 10px; text-align: right; border-bottom: 1px solid #232836; white-space: nowrap; }
   th { color: #7a8194; font-weight: 500; position: sticky; top: 0; background: #161a22; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: #c9cedb; }
   td.l, th.l { text-align: left; }
   tbody tr:hover { background: #1c2130; }
   .table-wrap { max-height: 560px; overflow-y: auto; }
@@ -360,7 +362,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
   <div class="card"><h2>缓存命中率（按日）</h2><div id="chartHitRate" class="chart"></div></div>
   <div class="card"><h2>项目排行（Top 15）</h2><div id="chartProjects" class="chart"></div></div>
   <div class="card full"><h2>星期 × 小时 热力图</h2><div id="chartHeatmap" class="chart"></div></div>
-  <div class="card full"><h2>会话明细（按 total 降序，最多 200 行）</h2>
+  <div class="card full"><h2>会话明细（点击 开始/结束/Total 表头排序，最多 200 行）</h2>
     <div class="table-wrap"><table id="sessionTable"></table></div>
   </div>
 </div>
@@ -565,22 +567,41 @@ Object.keys(opts).forEach(function (id) {
 
 // 7. 会话明细表
 (function () {
-  var rows = DATA.sessions.slice(0, 200);
-  var head = '<thead><tr>' +
-    '<th class="l">Session</th><th class="l">项目</th><th class="l">模型</th>' +
-    '<th>Input</th><th>Output</th><th>CacheRead</th>' +
-    '<th>请求数</th><th class="l">开始</th><th class="l">结束</th><th>Total</th></tr></thead>';
-  var body = rows.map(function (s) {
-    return '<tr>' +
-      '<td class="l mono" title="' + s.sessionId + '">' + s.sessionId.replace('session_', '').slice(0, 8) + '…</td>' +
-      '<td class="l" title="' + s.workDir + '">' + s.project + '</td>' +
-      '<td class="l mono" title="' + s.models.join(', ') + '">' + (s.models.length > 1 ? s.models.length + ' 个模型' : s.models[0]) + '</td>' +
-      '<td>' + fmt(s.input) + '</td><td>' + fmt(s.output) + '</td><td>' + fmt(s.cacheRead) + '</td>' +
-      '<td>' + fmt(s.requests) + '</td>' +
-      '<td class="l mono">' + fmtTime(s.first) + '</td><td class="l mono">' + fmtTime(s.last) + '</td>' +
-      '<td><b>' + fmt(s.total) + '</b></td></tr>';
-  }).join('');
-  document.getElementById('sessionTable').innerHTML = head + '<tbody>' + body + '</tbody>';
+  var sortState = { key: 'total', dir: -1 };
+  var table = document.getElementById('sessionTable');
+  function th(key, label, cls) {
+    var arrow = sortState.key === key ? (sortState.dir < 0 ? ' ▼' : ' ▲') : '';
+    return '<th class="sortable ' + cls + '" data-key="' + key + '">' + label + arrow + '</th>';
+  }
+  function render() {
+    var rows = DATA.sessions.slice().sort(function (a, b) {
+      return (a[sortState.key] - b[sortState.key]) * sortState.dir;
+    }).slice(0, 200);
+    var head = '<thead><tr>' +
+      '<th class="l">Session</th><th class="l">项目</th><th class="l">模型</th>' +
+      '<th>Input</th><th>Output</th><th>CacheRead</th>' +
+      '<th>请求数</th>' + th('first', '开始', 'l') + th('last', '结束', 'l') + th('total', 'Total', '') + '</tr></thead>';
+    var body = rows.map(function (s) {
+      return '<tr>' +
+        '<td class="l mono" title="' + s.sessionId + '">' + s.sessionId.replace('session_', '').slice(0, 8) + '…</td>' +
+        '<td class="l" title="' + s.workDir + '">' + s.project + '</td>' +
+        '<td class="l mono" title="' + s.models.join(', ') + '">' + (s.models.length > 1 ? s.models.length + ' 个模型' : s.models[0]) + '</td>' +
+        '<td>' + fmt(s.input) + '</td><td>' + fmt(s.output) + '</td><td>' + fmt(s.cacheRead) + '</td>' +
+        '<td>' + fmt(s.requests) + '</td>' +
+        '<td class="l mono">' + fmtTime(s.first) + '</td><td class="l mono">' + fmtTime(s.last) + '</td>' +
+        '<td><b>' + fmt(s.total) + '</b></td></tr>';
+    }).join('');
+    table.innerHTML = head + '<tbody>' + body + '</tbody>';
+  }
+  table.addEventListener('click', function (e) {
+    var t = e.target.closest('th.sortable');
+    if (!t) return;
+    var key = t.getAttribute('data-key');
+    if (sortState.key === key) sortState.dir = -sortState.dir;
+    else { sortState.key = key; sortState.dir = -1; }
+    render();
+  });
+  render();
 })();
 
 }
