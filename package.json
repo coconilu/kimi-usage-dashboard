@@ -1,6 +1,6 @@
 {
   "name": "kimi-usage",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Zero-dependency local usage analytics dashboard for Kimi Code CLI — scans wire.jsonl logs and serves a live self-contained HTML report",
   "keywords": [
     "kimi-code",
