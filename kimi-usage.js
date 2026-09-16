@@ -331,7 +331,8 @@ function normalizeResetMs(v) {
 }
 
 /** 校验并解析 usage 响应；整体结构不符（code!==0 / kind!=="ok"）返回 null；
- *  summary 或单个 limits[] 项字段缺失/非法时按缺行处理，不整卡隐藏 */
+ *  summary 或单个 limits[] 项字段缺失/非法时按缺行处理，不整卡隐藏；
+ *  limits[] 与 summary 按 duration-unit 去重（limits 在前，保留先出现的 = limits 优先） */
 function parseQuota(body) {
   if (!body || typeof body !== 'object') return null;
   if (body.code !== 0) return null;
@@ -345,13 +346,16 @@ function parseQuota(body) {
   if (data.summary && typeof data.summary === 'object') windows.push(data.summary);
 
   const rows = [];
+  const seen = new Set();
   for (const w of windows) {
+    const key = `${w.window && w.window.duration || ''}-${w.window && w.window.unit || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     const label = quotaWindowLabel(w.window);
     if (!label) continue;
     const used = w.used, limit = w.limit;
     if (typeof used !== 'number' || !isFinite(used) || used < 0) continue;
     if (typeof limit !== 'number' || !isFinite(limit) || limit <= 0) continue;
-    const key = `${w.window && w.window.duration || ''}-${w.window && w.window.unit || ''}`;
     rows.push({ key, label, used, limit, ratio: used / limit, resetMs: normalizeResetMs(w.reset_at) });
   }
   return { rows, fetchedAt: Date.now() };
@@ -364,26 +368,29 @@ function fetchQuotaUsage(token, timeoutMs, cb) {
   let url;
   try { url = new URL(QUOTA_URL); } catch { return once(new Error(`KIMI_USAGE_SERVER_URL 非法: ${QUOTA_URL}`)); }
   const lib = url.protocol === 'https:' ? https : http;
-  const req = lib.request(url, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-    timeout: timeoutMs,
-  }, (res) => {
-    if (res.statusCode !== 200) { res.resume(); return once(new Error(`HTTP ${res.statusCode}`)); }
-    const chunks = [];
-    let size = 0;
-    res.on('data', (c) => {
-      size += c.length;
-      if (size > 1024 * 1024) { req.destroy(new Error('响应过大')); return; }
-      chunks.push(c);
+  let req;
+  try {
+    req = lib.request(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      timeout: timeoutMs,
+    }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); return once(new Error(`HTTP ${res.statusCode}`)); }
+      const chunks = [];
+      let size = 0;
+      res.on('data', (c) => {
+        size += c.length;
+        if (size > 1024 * 1024) { req.destroy(new Error('响应过大')); return; }
+        chunks.push(c);
+      });
+      res.on('end', () => {
+        let body;
+        try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return once(new Error('响应不是合法 JSON')); }
+        once(null, body);
+      });
+      res.on('error', once);
     });
-    res.on('end', () => {
-      let body;
-      try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return once(new Error('响应不是合法 JSON')); }
-      once(null, body);
-    });
-    res.on('error', once);
-  });
+  } catch (err) { return once(err); } // token 含非法 header 字符等同步抛错归一为回调，不让异常逃出 Promise executor
   req.on('timeout', () => req.destroy(new Error('请求超时')));
   req.on('error', once);
   req.end();
@@ -402,14 +409,18 @@ function refreshQuotaOnce(state) {
       }
       resolve();
     };
-    const token = loadServerToken(state.home);
-    if (!token) return done(null, new Error('server.token 缺失或为空'));
-    fetchQuotaUsage(token, QUOTA_TIMEOUT_MS, (err, body) => {
-      if (err) return done(null, err);
-      const q = parseQuota(body);
-      if (!q) return done(null, new Error('响应结构不符预期'));
-      done(q);
-    });
+    try {
+      const token = loadServerToken(state.home);
+      if (!token) return done(null, new Error('server.token 缺失或为空'));
+      fetchQuotaUsage(token, QUOTA_TIMEOUT_MS, (err, body) => {
+        if (err) return done(null, err);
+        const q = parseQuota(body);
+        if (!q) return done(null, new Error('响应结构不符预期'));
+        done(q);
+      });
+    } catch (err) {
+      done(null, err); // executor 内任何同步异常（如 token 读取抛错）也不允许 reject
+    }
   });
 }
 
@@ -502,12 +513,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
   <div class="meta"><span id="meta"></span><span id="liveDot"> · ● 实时更新中</span></div>
 </header>
 
-<div class="kpi-row" id="kpiRow"></div>
-
 <div class="card full quota-card" id="quotaCard" style="display:none">
   <h2>额度（Coding Plan）</h2>
   <div id="quotaBody"></div>
 </div>
+
+<div class="kpi-row" id="kpiRow"></div>
 
 <div class="grid">
   <div class="card full"><h2>每日 Token 趋势</h2><div id="chartDaily" class="chart tall"></div></div>
