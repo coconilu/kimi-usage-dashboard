@@ -514,7 +514,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 </header>
 
 <div class="card full quota-card" id="quotaCard" style="display:none">
-  <h2>额度（Coding Plan）</h2>
+  <h2>Kimi Coding Plan</h2>
   <div id="quotaBody"></div>
 </div>
 
