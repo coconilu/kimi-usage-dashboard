@@ -6,10 +6,14 @@
  * 扫描 ~/.kimi-code/sessions/** 的 wire.jsonl（支持 KIMI_CODE_HOME / --home），
  * 默认启动实时 Dashboard（node:http + SSE，自动开浏览器，无连接 60s 自动退出），
  * 或 --export 生成自包含静态 HTML。
+ * 另有 Coding Plan 额度卡：轮询 Kimi Code CLI 本地 server 的 /api/v1/oauth/usage
+ * （Bearer <home>/server.token，端口默认 58627，可用 KIMI_USAGE_SERVER_URL 覆盖整个 URL）；
+ * server 未运行、请求失败或响应结构不符时整卡自动隐藏。
  *
  * Usage: node kimi-usage.js [--days N] [--home PATH] [--port N] [--no-open] [--export FILE]
  */
 const http = require('node:http');
+const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
@@ -18,6 +22,10 @@ const { exec } = require('node:child_process');
 const USAGE_MARK = '"usage.record"';
 const IDLE_MS = parseInt(process.env.KIMI_USAGE_IDLE_MS || '60000', 10);
 const POLL_MS = 2000;
+const QUOTA_POLL_MS = 45000;   // 额度接口轮询间隔（30-60 秒）
+const QUOTA_TIMEOUT_MS = 10000;
+const QUOTA_URL = process.env.KIMI_USAGE_SERVER_URL
+  || 'http://127.0.0.1:58627/api/v1/oauth/usage';
 
 // ---------------------------------------------------------------- CLI 参数
 
@@ -276,7 +284,144 @@ function buildData(state, days) {
       cacheHitRate: denom ? +(sumCr / denom).toFixed(4) : 0,
       activeSessions: sessions.size,
     },
+    quota: state.quota || null,
   };
+}
+
+// ---------------------------------------------------------------- 额度（Coding Plan）
+// 凭 <home>/server.token（仅用于 Bearer 鉴权，绝不打印明文）轮询 Kimi Code CLI
+// 本地 server 的 /api/v1/oauth/usage 代理路由。任何异常（token 缺失、server 不在、
+// 网络失败/超时、非 200、code!==0、kind!=="ok"、整体结构不符）都把 state.quota
+// 置为 null —— 前端据此整卡隐藏，不影响本地日志解析。
+// 响应信封：{ code: 0, data: { kind: "ok", summary: {window,used,limit,reset_at},
+//           limits: [...] } }；summary 与 limits[].window 为 {duration, unit}。
+
+const QUOTA_UNIT_LABEL = { hour: '小时', day: '今日', week: '本周', month: '本月' };
+
+function loadServerToken(home) {
+  let text;
+  try { text = fs.readFileSync(path.join(home, 'server.token'), 'utf8'); } catch { return null; }
+  const t = text.trim();
+  return t ? t : null;
+}
+
+/** window {duration, unit} → 中文标签；无法识别返回 null */
+function quotaWindowLabel(w) {
+  if (!w || typeof w !== 'object') return null;
+  const unit = w.unit;
+  if (typeof unit !== 'string' || !QUOTA_UNIT_LABEL[unit]) return null;
+  if (unit === 'hour') {
+    const d = typeof w.duration === 'number' && isFinite(w.duration) && w.duration > 0 ? w.duration : null;
+    return d ? `${d} 小时` : '小时';
+  }
+  return QUOTA_UNIT_LABEL[unit];
+}
+
+/** reset_at 容错：epoch 秒/毫秒、纯数字字符串、ISO 日期字符串；解析失败返回 null */
+function normalizeResetMs(v) {
+  let n = null;
+  if (typeof v === 'number' && isFinite(v)) n = v;
+  else if (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v)) n = parseFloat(v);
+  else if (typeof v === 'string' && v) {
+    const t = Date.parse(v);
+    return isNaN(t) ? null : t;
+  }
+  if (n == null) return null;
+  return n < 1e12 ? n * 1000 : n; // 秒级时间戳转毫秒
+}
+
+/** 校验并解析 usage 响应；整体结构不符（code!==0 / kind!=="ok"）返回 null；
+ *  summary 或单个 limits[] 项字段缺失/非法时按缺行处理，不整卡隐藏；
+ *  limits[] 与 summary 按 duration-unit 去重（limits 在前，保留先出现的 = limits 优先） */
+function parseQuota(body) {
+  if (!body || typeof body !== 'object') return null;
+  if (body.code !== 0) return null;
+  const data = body.data;
+  if (!data || typeof data !== 'object' || data.kind !== 'ok') return null;
+
+  const windows = [];
+  if (Array.isArray(data.limits)) {
+    windows.push(...data.limits.filter(w => w && typeof w === 'object'));
+  }
+  if (data.summary && typeof data.summary === 'object') windows.push(data.summary);
+
+  const rows = [];
+  const seen = new Set();
+  for (const w of windows) {
+    const key = `${w.window && w.window.duration || ''}-${w.window && w.window.unit || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const label = quotaWindowLabel(w.window);
+    if (!label) continue;
+    const used = w.used, limit = w.limit;
+    if (typeof used !== 'number' || !isFinite(used) || used < 0) continue;
+    if (typeof limit !== 'number' || !isFinite(limit) || limit <= 0) continue;
+    rows.push({ key, label, used, limit, ratio: used / limit, resetMs: normalizeResetMs(w.reset_at) });
+  }
+  return { rows, fetchedAt: Date.now() };
+}
+
+/** GET usage 接口；cb(err, body) 只回调一次 */
+function fetchQuotaUsage(token, timeoutMs, cb) {
+  let done = false;
+  const once = (err, body) => { if (!done) { done = true; cb(err, body); } };
+  let url;
+  try { url = new URL(QUOTA_URL); } catch { return once(new Error(`KIMI_USAGE_SERVER_URL 非法: ${QUOTA_URL}`)); }
+  const lib = url.protocol === 'https:' ? https : http;
+  let req;
+  try {
+    req = lib.request(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      timeout: timeoutMs,
+    }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); return once(new Error(`HTTP ${res.statusCode}`)); }
+      const chunks = [];
+      let size = 0;
+      res.on('data', (c) => {
+        size += c.length;
+        if (size > 1024 * 1024) { req.destroy(new Error('响应过大')); return; }
+        chunks.push(c);
+      });
+      res.on('end', () => {
+        let body;
+        try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return once(new Error('响应不是合法 JSON')); }
+        once(null, body);
+      });
+      res.on('error', once);
+    });
+  } catch (err) { return once(err); } // token 含非法 header 字符等同步抛错归一为回调，不让异常逃出 Promise executor
+  req.on('timeout', () => req.destroy(new Error('请求超时')));
+  req.on('error', once);
+  req.end();
+}
+
+/** 单次额度刷新；永不 reject，结果写入 state.quota（失败为 null），状态切换时仅打一行日志 */
+function refreshQuotaOnce(state) {
+  return new Promise((resolve) => {
+    const done = (q, err) => {
+      state.quota = q;
+      const ok = !!q;
+      if (ok !== state.quotaOk) {
+        state.quotaOk = ok;
+        if (ok) console.log('已获取 Coding Plan 额度数据。');
+        else console.log(`额度信息不可用（${err && err.message ? err.message : err}），不展示额度卡。`);
+      }
+      resolve();
+    };
+    try {
+      const token = loadServerToken(state.home);
+      if (!token) return done(null, new Error('server.token 缺失或为空'));
+      fetchQuotaUsage(token, QUOTA_TIMEOUT_MS, (err, body) => {
+        if (err) return done(null, err);
+        const q = parseQuota(body);
+        if (!q) return done(null, new Error('响应结构不符预期'));
+        done(q);
+      });
+    } catch (err) {
+      done(null, err); // executor 内任何同步异常（如 token 读取抛错）也不允许 reject
+    }
+  });
 }
 
 // ---------------------------------------------------------------- 页面模板
@@ -325,6 +470,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
   .kpi-card .sub { font-size: 12px; margin-top: 6px; color: #7a8194; }
   .kpi-card .sub .up { color: #4cc38a; }
   .kpi-card .sub .down { color: #e5484d; }
+  .quota-card { margin-bottom: 24px; }
+  .quota-row { display: flex; align-items: center; gap: 12px; }
+  .quota-row + .quota-row { margin-top: 12px; }
+  .quota-label { flex: none; width: 96px; font-size: 13px; color: #c9cedb; }
+  .quota-track { flex: 1; height: 10px; background: #1e2330; border-radius: 5px; overflow: hidden; }
+  .quota-fill { height: 100%; border-radius: 5px; background: #5b8def; transition: width .4s; }
+  .quota-fill.warn { background: #e5a545; }
+  .quota-fill.hot { background: #e5484d; }
+  .quota-meta { flex: none; width: 300px; text-align: right; font-size: 12px; color: #7a8194; font-variant-numeric: tabular-nums; }
+  .quota-meta b { color: #d6d9e0; font-weight: 600; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
   .card {
     background: #161a22; border: 1px solid #232836; border-radius: 10px;
@@ -357,6 +512,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
   <h1>Kimi Code 用量 Dashboard</h1>
   <div class="meta"><span id="meta"></span><span id="liveDot"> · ● 实时更新中</span></div>
 </header>
+
+<div class="card full quota-card" id="quotaCard" style="display:none">
+  <h2>Kimi Coding Plan</h2>
+  <div id="quotaBody"></div>
+</div>
 
 <div class="kpi-row" id="kpiRow"></div>
 
@@ -396,6 +556,15 @@ var fmtTime = function (ms) {
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
 };
 
+var fmtReset = function (ms, now) {
+  if (!ms) return '—';
+  var m = Math.round((ms - now) / 60000);
+  if (m <= 0) return '已重置';
+  if (m < 60) return m + ' 分钟后重置';
+  if (m < 48 * 60) return (Math.round(m / 6) / 10) + ' 小时后重置';
+  return Math.round(m / 1440) + ' 天后重置';
+};
+
 document.getElementById('meta').textContent =
   '数据范围：' + DATA.dateRange + '（最近 ' + DATA.days + ' 天） · 更新于：' + DATA.generatedAt + ' · 数据源：~/.kimi-code/sessions';
 
@@ -419,6 +588,40 @@ document.getElementById('meta').textContent =
     return '<div class="kpi-card"><div class="label">' + c[0] + '</div><div class="value">' + c[1] + '</div><div class="sub">' + c[2] + '</div></div>';
   }).join('');
 })();
+
+// 额度卡：DATA.quota 缺失/不可用时整卡隐藏（display:none 且清空内容，无占位残留）
+(function () {
+  var card = document.getElementById('quotaCard');
+  var body = document.getElementById('quotaBody');
+  var q = DATA.quota;
+  if (!q || !q.rows || !q.rows.length) {
+    card.style.display = 'none';
+    body.innerHTML = '';
+    return;
+  }
+  var now = Date.now();
+  body.innerHTML = q.rows.map(function (r) {
+    var pct = r.ratio * 100;
+    var cls = pct >= 85 ? ' hot' : (pct >= 60 ? ' warn' : '');
+    return '<div class="quota-row">' +
+      '<div class="quota-label">' + r.label + '</div>' +
+      '<div class="quota-track"><div class="quota-fill' + cls + '" style="width:' + Math.min(100, pct) + '%"></div></div>' +
+      '<div class="quota-meta"><b>' + pct.toFixed(1) + '%</b> 已用（' + fmt(r.used) + '/' + fmt(r.limit) + '）· <span data-reset="' + (r.resetMs || '') + '">' + fmtReset(r.resetMs, now) + '</span></div>' +
+      '</div>';
+  }).join('');
+  card.style.display = '';
+})();
+
+// 额度重置倒计时本地每 30 秒刷新，不依赖服务端推送
+if (!renderAll.quotaTimer) {
+  renderAll.quotaTimer = setInterval(function () {
+    var spans = document.querySelectorAll('#quotaBody span[data-reset]');
+    var now = Date.now();
+    for (var i = 0; i < spans.length; i++) {
+      spans[i].textContent = fmtReset(+spans[i].getAttribute('data-reset'), now);
+    }
+  }, 30000);
+}
 
 var baseAxis = {
   axisLabel: { color: '#8a91a5' },
@@ -651,6 +854,8 @@ function createState(home) {
     fileStates: new Map(), // wirePath -> { offset, lineBuf }
     dataJson: '{}',
     data: null,
+    quota: null,       // 最近一次成功的额度快照（parseQuota 返回值），失败为 null
+    quotaOk: null,     // 上次额度刷新是否成功（用于状态切换时打一行日志）
   };
 }
 
@@ -722,19 +927,26 @@ function main() {
 
   // --export：静态导出后退出
   if (args.export) {
-    const data = buildData(state, args.days);
-    const html = renderHtml(safeJson(data), false);
-    const out = path.resolve(args.export);
-    fs.mkdirSync(path.dirname(out), { recursive: true });
-    fs.writeFileSync(out, html, 'utf8');
-    const k = data.kpi;
-    console.log(`\n=== 汇总（最近 ${args.days} 天，${data.dateRange}） ===`);
-    console.log(`本周(7天) total : ${k.weekTotal.toLocaleString('en-US')}`);
-    console.log(`今日 total      : ${k.todayTotal.toLocaleString('en-US')}`);
-    console.log(`总缓存命中率    : ${(k.cacheHitRate * 100).toFixed(1)}%`);
-    console.log(`活跃会话数      : ${k.activeSessions}`);
-    console.log(`\n已导出: ${out}`);
-    process.exit(0);
+    refreshQuotaOnce(state).then(() => { // 导出时刻的额度快照；失败为 null，导出不带额度卡
+      const data = buildData(state, args.days);
+      const html = renderHtml(safeJson(data), false);
+      const out = path.resolve(args.export);
+      fs.mkdirSync(path.dirname(out), { recursive: true });
+      fs.writeFileSync(out, html, 'utf8');
+      const k = data.kpi;
+      console.log(`\n=== 汇总（最近 ${args.days} 天，${data.dateRange}） ===`);
+      console.log(`本周(7天) total : ${k.weekTotal.toLocaleString('en-US')}`);
+      console.log(`今日 total      : ${k.todayTotal.toLocaleString('en-US')}`);
+      console.log(`总缓存命中率    : ${(k.cacheHitRate * 100).toFixed(1)}%`);
+      console.log(`活跃会话数      : ${k.activeSessions}`);
+      if (data.quota) {
+        console.log(`\n=== 额度（导出时刻） ===`);
+        for (const r of data.quota.rows) console.log(`  ${r.label}: ${(r.ratio * 100).toFixed(1)}%（${r.used}/${r.limit}）`);
+      }
+      console.log(`\n已导出: ${out}`);
+      process.exit(0);
+    });
+    return;
   }
 
   // 服务模式
@@ -821,6 +1033,19 @@ function main() {
     }
   }, POLL_MS);
   if (poll.unref) poll.unref();
+
+  // 额度轮询（独立于日志扫描）；额度数据变化时重建数据帧并随 SSE 推送
+  async function pollQuota() {
+    const prev = state.quota && state.quota.fetchedAt;
+    await refreshQuotaOnce(state);
+    if ((state.quota && state.quota.fetchedAt) !== prev) {
+      refreshData();
+      if (clients.size > 0) broadcast();
+    }
+  }
+  pollQuota();
+  const quotaTimer = setInterval(pollQuota, QUOTA_POLL_MS);
+  if (quotaTimer.unref) quotaTimer.unref();
 
   process.on('SIGINT', () => {
     console.log('\n已停止。');
