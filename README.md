@@ -28,6 +28,7 @@ python python/build_dashboard.py --open   # Python fallback (no Node required), 
 ## Features
 
 - Live dashboard (SSE): daily trend, today's hourly trend, per-model breakdown, cache hit rate, project ranking, GitHub-style yearly activity calendar, session details
+- Coding Plan quota card: 5-hour / weekly usage bars with reset countdown — fetched live from the Kimi Code CLI local server's `/api/v1/oauth/usage` (Bearer `server.token`), and hidden entirely if the server is unavailable
 - Incremental log tailing — new turns show up within seconds
 - Single-file, zero-dependency Node script (only built-in modules)
 - Static `--export` mode produces one shareable HTML file
@@ -48,7 +49,7 @@ Options: `--days N` (default 30) · `--port N` · `--no-open` · `--export FILE`
 
 ## Known limitations
 
-- **Cost and weekly-quota percentage are server-side data** — local logs only contain token counts. Use `/usage` in the CLI or the Kimi Code Console for billing.
+- **Cost is still server-side data** — local logs only contain token counts. Quota (5-hour / weekly windows) is now shown live in the dashboard via the Kimi Code CLI local server's `/api/v1/oauth/usage` endpoint (the card hides itself automatically when the server is not running), but exact cost/billing still needs `/usage` in the CLI or the Kimi Code Console.
 
 ## Roadmap
 
@@ -88,6 +89,7 @@ python python/build_dashboard.py --open   # Python 版（无需 Node 环境）�
 ## 功能特性
 
 - 实时 Dashboard（SSE 推送）：每日趋势、今日按小时趋势、模型细分、缓存命中率、项目排行、GitHub 风格年度活动日历、会话明细
+- 额度卡：5 小时 / 本周额度进度条与重置倒计时——实时调用 Kimi Code CLI 本地 server 的 /api/v1/oauth/usage 获取（Bearer server.token），server 未运行时整卡自动隐藏
 - 增量读取日志，新用量几秒内上屏
 - 单文件零依赖 Node 脚本（只用内置模块）
 - `--export` 生成单个可分享的静态 HTML
@@ -108,7 +110,7 @@ Kimi Code CLI 把会话记录存在 `~/.kimi-code/sessions/`（`agents/*/wire.js
 
 ## 已知限制
 
-- **费用与周额度百分比是服务端数据**，本地日志只有 token 计数——请用 CLI 内 `/usage` 或 Kimi Code Console 查看。
+- **费用仍是服务端数据**：本地日志只有 token 计数。额度（5 小时 / 本周窗口）已通过 Kimi Code CLI 本地 server 的 /api/v1/oauth/usage 实时展示（server 未运行时自动隐藏），但精确费用/账单仍需 CLI 内 `/usage` 或 Kimi Code Console 查看。
 
 ## Roadmap
 
